@@ -23,7 +23,7 @@ The stream shows your recent days in full, newest first. Tick tasks right there.
 ## Settings
 
 - **Daily notes**: uses the core Daily Notes plugin's folder, date format and template by default. Turn that off to set your own.
-- **Include subfolders**: finds daily notes in folders inside your daily notes folder too, such as an `Archive` folder, by file name. On by default. New days are still created in the main folder.
+- **Include subfolders**: finds daily notes in folders inside your daily notes folder too, such as an `Archive` folder, by file name, up to 3 folders deep. Only the daily notes folder is looked through. On by default. New days are still created in the main folder.
 - **Prompt heading**: the heading whose first line is shown as the day's prompt (default `Reflection`).
 - **Layout**: week starts on Monday or Sunday, how many weeks the board shows, how many days the stream shows.
 - **Background**: None (your theme shows through), two built-in aurora pictures, any picture from your vault (with Darken and Blur), or **Static Aurora (live colours)**.

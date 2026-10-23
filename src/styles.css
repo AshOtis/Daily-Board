@@ -83,7 +83,8 @@ body.sa-still .db-bg-aurora::before { animation: none; }
 .db-day.is-today .db-dn { color: var(--text-accent); }
 .db-day.is-empty { background: transparent; border-style: dashed; }
 .db-day.is-future { background: transparent; border-style: dashed; opacity: .35; cursor: default; }
-.db-day.is-dim, .db-entry.is-dim { opacity: .3; }
+.db-day.is-dim, .db-entry.is-dim { opacity: .3; transition: opacity .15s ease; }
+.db-day.is-dim:hover, .db-entry.is-dim:hover { opacity: .9; }
 .db-dh { display: flex; align-items: baseline; justify-content: space-between; }
 .db-dn { font-weight: 600; font-size: var(--font-ui-small); }
 .db-dd { font-size: var(--font-ui-smaller); color: var(--text-faint); }

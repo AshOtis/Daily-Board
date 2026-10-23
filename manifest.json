@@ -1,7 +1,7 @@
 {
   "id": "daily-board",
   "name": "Daily Board",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minAppVersion": "1.5.0",
   "description": "See your daily notes as a board of week cards, or one long stream you can write in. Shows focus time, open tasks and the day's prompt from your notes.",
   "author": "AshOtis",

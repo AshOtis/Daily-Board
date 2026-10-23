@@ -1,11 +1,12 @@
 /* Daily Board: your daily notes as a board of week cards, or one long stream you can write in. */
 
 const DB_VIEW = 'daily-board-view';
+const DB_DEPTH = 3;
 const DB_DEFAULTS = {
   useCore: true, folder: '', format: '', template: '',
   weekStart: 1, weeks: 3, streamDays: 14, promptHeading: 'Reflection', subfolders: true,
   layout: 'board', onlyThoughts: false, onlyFocus: false,
-  bg: 'none', bgImage: '', bgDim: 35, bgBlur: 0, bgGlow: 70, openOnStart: false,
+  bg: 'none', bgImage: '', bgDim: 35, bgBlur: 0, bgGlow: 35, bgAuroraDim: 50, openOnStart: false,
 };
 const DB_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -52,8 +53,16 @@ class DailyBoard extends Plugin {
   names(cfg) {
     const sig = cfg.folder + '|' + cfg.format;
     if (this.idx && this.idx.sig === sig) return this.idx.map;
-    const map = new Map(), pre = cfg.folder + '/';
-    for (const f of this.app.vault.getMarkdownFiles()) if (f.path.startsWith(pre) && !map.has(f.basename)) map.set(f.basename, f);
+    // walk only the daily notes folder itself, at most DB_DEPTH folders down (Archive/2026/October is 3)
+    const map = new Map();
+    const walk = (folder, depth) => {
+      for (const c of folder.children || []) {
+        if (c.children) { if (depth < DB_DEPTH) walk(c, depth + 1); }
+        else if (c.extension === 'md' && !map.has(c.basename)) map.set(c.basename, c);
+      }
+    };
+    const root = this.app.vault.getAbstractFileByPath(cfg.folder);
+    if (root && root.children) walk(root, 0);
     this.idx = { sig, map };
     return map;
   }
@@ -108,7 +117,7 @@ class DBView extends ItemView {
     for (const k of ['warm', 'north', 'aurora']) host.toggleClass('db-bg-' + k, bg === k);
     host.toggleClass('db-bg-host', bg !== 'none');
     if (bg === 'none') { host.setCssProps({ '--db-bg': '' }); return; }
-    host.setCssProps({ '--db-bg': url, '--db-dim': String(d.bgDim / 100), '--db-blur': d.bgBlur + 'px', '--db-glow': String((d.bgGlow ?? 70) / 100) });
+    host.setCssProps({ '--db-bg': url, '--db-dim': String((bg === 'aurora' ? (d.bgAuroraDim ?? 50) : d.bgDim) / 100), '--db-blur': d.bgBlur + 'px', '--db-glow': String((d.bgGlow ?? 35) / 100) });
   }
 
   async render(fromVault) {
@@ -322,7 +331,7 @@ class DBSettings extends PluginSettingTab {
       const c = p.cfg();
       el.createDiv({ cls: 'setting-item-description db-cfg', text: `Using: ${c.folder || 'vault root'} · ${c.format}${c.template ? ' · template ' + c.template : ''}` });
     }
-    new Setting(el).setName('Include subfolders').setDesc('Also find daily notes in folders inside the daily notes folder, such as an Archive folder. New days are still created in the main folder.')
+    new Setting(el).setName('Include subfolders').setDesc('Also find daily notes in folders inside the daily notes folder, such as an Archive folder (up to 3 folders deep). New days are still created in the main folder.')
       .addToggle(t => t.setValue(d.subfolders !== false).onChange(v => { d.subfolders = v; p.idx = null; go(); }));
     new Setting(el).setName('Prompt heading').setDesc('Cards show the first line under this heading as the day\'s prompt. One Page writes its prompt under "Reflection".')
       .addText(t => t.setValue(d.promptHeading).onChange(v => { d.promptHeading = v.trim(); go(); }));
@@ -350,9 +359,9 @@ class DBSettings extends PluginSettingTab {
         ? 'The board shows the theme\'s aurora glows and accents, in the same colours. When Static FM, Aurora MP3 or Hi-Fi Tuner colour the theme, the board changes with it.'
         : 'Made for the Static Aurora theme, which isn\'t active. The board uses its default colours until you switch to it.' });
       new Setting(el).setName('Glow').setDesc('How strong the aurora is behind the board.')
-        .addSlider(sl => sl.setLimits(10, 100, 5).setValue(d.bgGlow ?? 70).setDynamicTooltip().onChange(v => { d.bgGlow = v; p.save(); p.redraw(); }));
+        .addSlider(sl => sl.setLimits(10, 100, 5).setValue(d.bgGlow ?? 35).setDynamicTooltip().onChange(v => { d.bgGlow = v; p.save(); p.redraw(); }));
       new Setting(el).setName('Darken').setDesc('Dim the glow so the cards stay easy to read.')
-        .addSlider(sl => sl.setLimits(0, 90, 5).setValue(d.bgDim).setDynamicTooltip().onChange(v => { d.bgDim = v; p.save(); p.redraw(); }));
+        .addSlider(sl => sl.setLimits(0, 90, 5).setValue(d.bgAuroraDim ?? 50).setDynamicTooltip().onChange(v => { d.bgAuroraDim = v; p.save(); p.redraw(); }));
     } else if (bg !== 'none') {
       new Setting(el).setName('Darken').setDesc('Dim the picture so the cards stay easy to read.')
         .addSlider(sl => sl.setLimits(0, 90, 5).setValue(d.bgDim).setDynamicTooltip().onChange(v => { d.bgDim = v; p.save(); p.redraw(); }));
