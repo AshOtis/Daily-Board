@@ -40,7 +40,10 @@ body.sa-still .db-bg-aurora::before { animation: none; }
 .db-bg-aurora .db-stat.is-hot .db-n { color: color-mix(in srgb, var(--db-a2) 65%, #fff); }
 .db-bg-aurora button.db-chip.is-on { background: color-mix(in srgb, var(--db-a1) 24%, transparent); }
 .db-bg-host > .view-header, .db-bg-host > .view-content { background: transparent; }
-.db-bg-host .db-day:not(.is-empty):not(.is-future), .db-bg-host .db-stat, .db-bg-host .db-entry { background: color-mix(in srgb, var(--background-primary) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+.db-bg-host .db-day:not(.is-empty):not(.is-future), .db-bg-host .db-stat { background: color-mix(in srgb, var(--background-primary) 72%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+/* stream entries are tall: a plain see-through panel instead of blurred glass keeps scrolling smooth over the moving aurora */
+.db-bg-host .db-entry { background: color-mix(in srgb, var(--background-primary) 86%, transparent); }
+.db-entry { contain: layout paint; }
 .db-bg-host .db-entry { border-radius: 12px; padding-left: 16px; padding-right: 16px; border: 1px solid var(--background-modifier-border); margin-bottom: 12px; }
 
 .db-wrap { padding: 20px 24px 40px; max-width: 1500px; margin: 0 auto; }
@@ -126,3 +129,18 @@ body.sa-still .db-bg-aurora::before { animation: none; }
 .db button.db-load { display: block; margin: 18px auto 0; }
 
 @media (max-width: 600px) { .db-wrap { padding: 14px; } .db-stat { min-width: 0; flex: 1; } }
+
+/* tasks view */
+.db-stat.is-link { cursor: pointer; } .db-stat.is-link:hover { border-color: var(--interactive-accent); }
+.db-ttools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.db-tsearch { flex: 1; min-width: 160px; }
+.db-tsum { color: var(--text-muted); font-size: var(--font-ui-small); white-space: nowrap; }
+.db-tday { padding: 12px 0 14px; border-bottom: 1px solid var(--background-modifier-border); contain: layout paint; }
+.db-bg-host .db-tday { background: color-mix(in srgb, var(--background-primary) 86%, transparent); border: 1px solid var(--background-modifier-border); border-radius: 12px; padding: 12px 16px; margin-bottom: 10px; }
+.db-tday-h { display: flex; align-items: baseline; gap: 10px; margin-bottom: 6px; }
+.db-thead { font-size: var(--font-ui-smaller); color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; margin: 8px 0 2px; }
+.db-task { display: flex; align-items: flex-start; gap: 8px; padding: 3px 0; cursor: pointer; }
+.db-task input { margin-top: 3px; flex: none; }
+.db-task.is-sub { padding-left: 22px; }
+.db-task.is-done span { color: var(--text-faint); text-decoration: line-through; }
+.db-hide { display: none !important; }

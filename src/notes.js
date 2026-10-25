@@ -68,6 +68,20 @@ function dbParse(text, promptHeading) {
   return { focus, open, done, prompt, words: words.length, snippet: snippet.join(' ') };
 }
 
+// Every task in a note, in file order: k is its number among all "- [ ]" lines in the file (the same count
+// the tick-off uses, so ticking one here changes exactly that line), heading is the section it sits under
+function dbTasks(text) {
+  const out = []; let k = -1, heading = '';
+  for (const line of String(text || '').replace(/\r\n/g, '\n').split('\n')) {
+    const h = line.match(/^#{1,6}\s+(.*)$/); if (h) { heading = dbPlain(h[1]); continue; }
+    const m = line.match(/^(\s*)[-*+]\s+\[( |x|X)\]\s?(.*)$/); if (!m) continue;
+    k++;
+    const t = dbPlain(m[3]); if (!t) continue;
+    out.push({ k, done: m[2] !== ' ', text: t, heading, sub: m[1].length > 0 });
+  }
+  return out;
+}
+
 // Markdown → plain text for previews
 function dbPlain(s) {
   return String(s)

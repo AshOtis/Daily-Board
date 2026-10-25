@@ -2,7 +2,7 @@
 import pathlib, shutil, base64
 R = pathlib.Path(__file__).resolve().parent; src = R / 'src'; out = R / 'dist'; out.mkdir(exist_ok=True)
 read = lambda f: (src / f).read_text(encoding='utf-8')
-main = ("'use strict';\nconst { Plugin, ItemView, Notice, PluginSettingTab, Setting, MarkdownRenderer, FuzzySuggestModal, setIcon } = require('obsidian');\n\n"
+main = ("'use strict';\nconst { Plugin, ItemView, Component, Notice, PluginSettingTab, Setting, MarkdownRenderer, FuzzySuggestModal, setIcon } = require('obsidian');\n\n"
         + read('notes.js') + '\n' + read('main.js') + '\nmodule.exports = DailyBoard;\n')
 (out / 'main.js').write_text(main, encoding='utf-8')
 css = read('styles.css')

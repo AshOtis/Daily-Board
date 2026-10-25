@@ -5,7 +5,7 @@ const DB_DEPTH = 3;
 const DB_DEFAULTS = {
   useCore: true, folder: '', format: '', template: '',
   weekStart: 1, weeks: 3, streamDays: 14, promptHeading: 'Reflection', subfolders: true,
-  layout: 'board', onlyThoughts: false, onlyFocus: false,
+  layout: 'board', onlyThoughts: false, onlyFocus: false, tasksDays: 90, tasksDone: false, tasksOrder: 'new',
   bg: 'none', bgImage: '', bgDim: 35, bgBlur: 0, bgGlow: 35, bgAuroraDim: 50, openOnStart: false,
 };
 const DB_DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -18,13 +18,18 @@ class DailyBoard extends Plugin {
     this.addRibbonIcon('calendar-days', 'Open Daily Board', () => this.open());
     this.addCommand({ id: 'open', name: 'Open the board', callback: () => this.open() });
     this.addCommand({ id: 'open-stream', name: 'Open the stream', callback: async () => { this.d.layout = 'stream'; await this.save(); this.open(); } });
+    this.addCommand({ id: 'open-tasks', name: 'Open all tasks', callback: async () => { this.d.layout = 'tasks'; await this.save(); this.open(); this.redraw(); } });
     this.addSettingTab(new DBSettings(this.app, this));
-    const changed = f => { if (f && f.path && f.path.endsWith('.md')) { this.cache.delete(f.path); this.soon(); } };
-    const moved = f => { this.idx = null; changed(f); };
+    const changed = f => { if (f && f.path && this.isDaily(f.path)) { this.cache.delete(f.path); this.soon(); } };
+    const moved = f => { if (f && f.path && f.path.endsWith('.md')) this.idx = null; changed(f); };
     this.registerEvent(this.app.vault.on('modify', changed));
     this.registerEvent(this.app.vault.on('create', moved));
     this.registerEvent(this.app.vault.on('delete', moved));
-    this.registerEvent(this.app.vault.on('rename', (f, old) => { this.cache.delete(old); moved(f); }));
+    this.registerEvent(this.app.vault.on('rename', (f, old) => { this.cache.delete(old); if (this.isDaily(old)) this.soon(); moved(f); }));
+    // a board that was hidden when a note changed catches up when you look at it again
+    const catchUp = () => this.views().forEach(v => { if (v.stale && v.visible()) v.render(true); });
+    this.registerEvent(this.app.workspace.on('active-leaf-change', catchUp));
+    this.registerEvent(this.app.workspace.on('layout-change', catchUp));
     this.app.workspace.onLayoutReady(() => { if (this.d.openOnStart) this.open(); });
   }
 
@@ -32,7 +37,16 @@ class DailyBoard extends Plugin {
   cfg() { return dbConfig(this.app, this.d); }
   views() { return this.app.workspace.getLeavesOfType(DB_VIEW).map(l => l.view).filter(v => v instanceof DBView); }
   redraw() { this.views().forEach(v => v.render()); }
-  soon() { clearTimeout(this.t); this.t = window.setTimeout(() => this.views().forEach(v => v.render(true)), 400); }
+  soon() { clearTimeout(this.t); this.t = window.setTimeout(() => this.views().forEach(v => { if (v.visible()) v.render(true); else v.stale = true; }), 400); }
+  // is this path a daily note? (inside the daily notes folder, named by its date format)
+  isDaily(path) {
+    if (!path || !path.endsWith('.md')) return false;
+    const cfg = this.cfg();
+    if (cfg.folder && !path.startsWith(cfg.folder + '/')) return false;
+    const rel = path.slice(cfg.folder ? cfg.folder.length + 1 : 0, -3), name = rel.split('/').pop();
+    if (window.moment(rel, cfg.format, true).isValid()) return true;
+    return this.d.subfolders !== false && window.moment(name, cfg.format.split('/').pop(), true).isValid();
+  }
 
   async open() {
     let leaf = this.app.workspace.getLeavesOfType(DB_VIEW)[0];
@@ -70,7 +84,9 @@ class DailyBoard extends Plugin {
   async info(file) {
     const hit = this.cache.get(file.path);
     if (hit && hit.mtime === file.stat.mtime) return hit.info;
-    const info = dbParse(await this.app.vault.cachedRead(file), this.d.promptHeading);
+    const text = await this.app.vault.cachedRead(file);
+    const info = dbParse(text, this.d.promptHeading);
+    info.tasks = dbTasks(text);
     this.cache.set(file.path, { mtime: file.stat.mtime, info });
     return info;
   }
@@ -100,11 +116,16 @@ class DailyBoard extends Plugin {
 }
 
 class DBView extends ItemView {
-  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.offset = 0; this.shown = plugin.d.streamDays; this.editing = null; this.jump = null; this.seq = 0; }
+  constructor(leaf, plugin) { super(leaf); this.plugin = plugin; this.offset = 0; this.shown = plugin.d.streamDays; this.editing = null; this.jump = null; this.seq = 0; this.bodies = new Map(); this.stale = false; }
   getViewType() { return DB_VIEW; }
   getDisplayText() { return 'Daily Board'; }
   getIcon() { return 'calendar-days'; }
   async onOpen() { this.contentEl.addClass('db'); this.render(); }
+  async onClose() { if (this.io) this.io.disconnect(); this.dropAll(); }
+  visible() { return !!this.containerEl.offsetParent; }
+  // rendered notes, reused until the note changes: { mtime, el, comp }
+  drop(path) { const b = this.bodies.get(path); if (b) { this.removeChild(b.comp); this.bodies.delete(path); } }
+  dropAll() { for (const k of [...this.bodies.keys()]) this.drop(k); }
 
   // what sits behind the board: nothing (your theme shows through), a built-in aurora picture, or your own picture
   paintBackground() {
@@ -122,6 +143,7 @@ class DBView extends ItemView {
 
   async render(fromVault) {
     if (fromVault && this.editing) return;          // never pull the rug out from under someone typing
+    this.stale = false;
     const seq = ++this.seq, p = this.plugin, d = p.d;
     const scroll = this.contentEl.scrollTop;
     this.paintBackground();
@@ -144,11 +166,14 @@ class DBView extends ItemView {
     for (let i = 0; i < 7; i++) { const f = p.file(dbAdd(thisWeek, i)); if (f) { const n = await p.info(f); weekFocus += n.focus; weekWords += n.words; } }
     for (let i = 0; i < 30; i++) { const f = p.file(dbAdd(today, -i)); if (f) openThoughts += (await p.info(f)).open.length; }
     if (seq !== this.seq) return;
-    const stat = (n, l, hot) => { const s = stats.createDiv({ cls: 'db-stat' + (hot ? ' is-hot' : '') }); s.createDiv({ cls: 'db-n', text: n }); s.createDiv({ cls: 'db-l', text: l }); };
+    const stat = (n, l, hot, go) => {
+      const s = stats.createDiv({ cls: 'db-stat' + (hot ? ' is-hot' : '') + (go ? ' is-link' : '') }); s.createDiv({ cls: 'db-n', text: n }); s.createDiv({ cls: 'db-l', text: l });
+      if (go) { s.setAttr('aria-label', 'Show them all'); s.onclick = go; }
+    };
     stat(streak === 1 ? '1 day' : `${streak} days`, 'current streak', streak > 0);
     stat(dbMins(weekFocus), 'focused this week');
     stat(weekWords.toLocaleString(), 'words this week');
-    stat(String(openThoughts), 'open tasks, 30 days');
+    stat(String(openThoughts), 'open tasks, 30 days', false, () => { d.layout = 'tasks'; p.save(); this.render(); });
 
     // bar
     const bar = wrap.createDiv({ cls: 'db-bar' });
@@ -167,15 +192,15 @@ class DBView extends ItemView {
       const c = bar.createEl('button', { cls: 'db-chip' + (d[key] ? ' is-on' : ''), text });
       c.onclick = () => { d[key] = !d[key]; p.save(); this.render(); };
     };
-    chip('onlyThoughts', 'Open tasks'); chip('onlyFocus', 'Focus sessions');
+    if (d.layout !== 'tasks') { chip('onlyThoughts', 'Open tasks'); chip('onlyFocus', 'Focus sessions'); }
     const seg = bar.createDiv({ cls: 'db-seg' });
-    [['board', 'Board'], ['stream', 'Stream']].forEach(([k, t]) => {
+    [['board', 'Board'], ['stream', 'Stream'], ['tasks', 'Tasks']].forEach(([k, t]) => {
       const b = seg.createEl('button', { cls: d.layout === k ? 'is-on' : '', text: t });
       b.onclick = () => { d.layout = k; p.save(); this.render(); };
     });
 
-    if (d.layout === 'board') await this.board(wrap, today, thisWeek);
-    else await this.stream(wrap, today);
+    if (d.layout === 'stream') await this.stream(wrap, today);
+    else { if (this.io) { this.io.disconnect(); this.io = null; } if (d.layout === 'tasks') await this.tasks(wrap, today); else await this.board(wrap, today, thisWeek); }
     if (seq !== this.seq) return;
     this.contentEl.empty(); this.contentEl.appendChild(wrap);
     if (this.jump) { const t = wrap.querySelector(`[data-day="${this.jump}"]`); this.jump = null; if (t) t.scrollIntoView({ block: 'start' }); }
@@ -230,9 +255,70 @@ class DBView extends ItemView {
     }
   }
 
+  // every task from your daily notes in one list: parked thoughts from Lantern, and any other "- [ ]"
+  async tasks(wrap, today) {
+    const p = this.plugin, d = p.d;
+    const tools = wrap.createDiv({ cls: 'db-ttools' });
+    const sel = (opts, val, fn) => { const s = tools.createEl('select', { cls: 'dropdown' }); for (const [v, t] of opts) { const o = s.createEl('option', { text: t }); o.value = String(v); } s.value = String(val); s.onchange = () => fn(s.value); return s; };
+    sel([[14, 'Last 2 weeks'], [30, 'Last 30 days'], [90, 'Last 90 days'], [365, 'Last year']], d.tasksDays, v => { d.tasksDays = Number(v); p.save(); this.render(); });
+    sel([['new', 'Newest first'], ['old', 'Oldest first']], d.tasksOrder, v => { d.tasksOrder = v; p.save(); this.render(); });
+    const done = tools.createEl('button', { cls: 'db-chip' + (d.tasksDone ? ' is-on' : ''), text: 'Show done' });
+    done.onclick = () => { d.tasksDone = !d.tasksDone; p.save(); this.render(); };
+    const search = tools.createEl('input', { type: 'search', cls: 'db-tsearch', attr: { placeholder: 'Filter tasks…' } });
+    const sum = tools.createDiv({ cls: 'db-tsum' });
+
+    const days = [];
+    for (let i = 0; i < d.tasksDays; i++) {
+      const day = dbAdd(today, -i), file = p.file(day); if (!file) continue;
+      const list = (await p.info(file)).tasks.filter(t => d.tasksDone || !t.done);
+      if (list.length) days.push({ day, file, list });
+    }
+    if (d.tasksOrder === 'old') days.reverse();
+    const box = wrap.createDiv({ cls: 'db-tasklist' });
+    if (!days.length) { box.createDiv({ cls: 'db-emptytext', text: d.tasksDone ? 'No tasks in these days.' : 'Nothing open. Parked thoughts from Lantern Focus, and any - [ ] task in your daily notes, show up here.' }); sum.setText(''); return; }
+    const all = [];
+    for (const g of days) {
+      const sec = box.createDiv({ cls: 'db-tday' });
+      const h = sec.createDiv({ cls: 'db-tday-h' });
+      const a = h.createEl('a', { cls: 'db-etitle', text: `${DB_DOW[g.day.getDay()]} ${window.moment(g.day).format('D MMM YYYY')}` });
+      a.onclick = e => { e.preventDefault(); this.app.workspace.getLeaf(e.ctrlKey || e.metaKey ? 'tab' : false).openFile(g.file); };
+      const age = Math.round((today - g.day) / 864e5);
+      h.createSpan({ cls: 'db-wd', text: age === 0 ? 'today' : age === 1 ? 'yesterday' : `${age} days ago` });
+      let lastHead = null;
+      for (const t of g.list) {
+        if (t.heading && t.heading !== lastHead && t.heading !== g.file.basename) sec.createDiv({ cls: 'db-thead', text: t.heading });   // not the note's own title
+        lastHead = t.heading;
+        const row = sec.createEl('label', { cls: 'db-task' + (t.done ? ' is-done' : '') + (t.sub ? ' is-sub' : '') });
+        const cb = row.createEl('input', { type: 'checkbox', cls: 'task-list-item-checkbox' }); cb.checked = t.done;
+        row.createSpan({ text: t.text });
+        cb.onchange = async () => {
+          row.toggleClass('is-done', cb.checked);
+          await this.app.vault.process(g.file, txt => { let k = -1; return txt.replace(/^(\s*[-*+]\s+\[)( |x|X)(\])/gm, (m0, x, c, y) => (++k === t.k ? x + (cb.checked ? 'x' : ' ') + y : m0)); });
+        };
+        all.push({ row, sec, text: t.text.toLowerCase() });
+      }
+    }
+    const count = () => {
+      const q = search.value.trim().toLowerCase(); let n = 0;
+      for (const x of all) { const on = !q || x.text.includes(q); x.row.toggleClass('db-hide', !on); if (on && !x.row.hasClass('is-done')) n++; }
+      for (const g of box.children) g.toggleClass('db-hide', !g.querySelector('.db-task:not(.db-hide)'));
+      sum.setText(`${n} open · ${days.length} ${days.length === 1 ? 'day' : 'days'}`);
+    };
+    search.addEventListener('input', count); count();
+  }
+
   async stream(wrap, today) {
     const p = this.plugin;
     const list = wrap.createDiv({ cls: 'db-stream' });
+    if (this.io) this.io.disconnect();
+    // bodies are rendered as they come near the screen, so a long stream opens straight away
+    const lazy = [];
+    this.io = new IntersectionObserver(es => es.forEach(e => {
+      if (!e.isIntersecting) return;
+      this.io.unobserve(e.target);
+      const job = e.target.dbJob; if (job) { e.target.dbJob = null; job(); }
+    }), { root: this.contentEl, rootMargin: '900px 0px' });
+    const keep = new Set();
     for (let i = 0; i < this.shown; i++) {
       const day = dbAdd(today, -i), file = p.file(day), key = dbKey(day);
       if (!file) {
@@ -242,6 +328,7 @@ class DBView extends ItemView {
         b.onclick = async () => { await p.create(day); this.jump = key; this.render(); };
         continue;
       }
+      keep.add(file.path);
       const n = await p.info(file);
       const entry = list.createDiv({ cls: 'db-entry' + (i === 0 ? ' is-today' : '') + (this.dim(n) ? ' is-dim' : ''), attr: { 'data-day': key } });
       const eh = entry.createDiv({ cls: 'db-eh' });
@@ -254,25 +341,37 @@ class DBView extends ItemView {
       const edit = eh.createEl('button', { cls: 'db-btn db-edit', attr: { 'aria-label': 'Edit here' } });
       setIcon(edit, 'pencil');
       const body = entry.createDiv({ cls: 'db-body markdown-rendered' });
-      await this.showNote(body, file);
+      const have = this.bodies.get(file.path);
+      if (have && have.mtime === file.stat.mtime) body.appendChild(have.el);           // unchanged: reuse it
+      else {
+        // a rough height from the word count, so the page doesn't jump as notes fill in
+        body.setCssProps({ 'min-height': Math.min(600, 40 + n.words * 0.9) + 'px' });
+        const job = () => this.showNote(body, file).then(() => body.setCssProps({ 'min-height': '' }));
+        if (i < 2 || this.jump === key) lazy.push(job); else { body.dbJob = job; this.io.observe(body); }
+      }
       const startEdit = () => this.edit(body, file);
       edit.onclick = startEdit;
       body.addEventListener('dblclick', e => { if (!e.target.closest('a, input')) startEdit(); });
     }
+    for (const k of [...this.bodies.keys()]) if (!keep.has(k)) this.drop(k);    // days no longer shown
+    for (const job of lazy) await job();
     const more = wrap.createEl('button', { cls: 'db-btn db-load', text: 'Show earlier days' });
     more.onclick = () => { this.shown += 14; this.render(); };
   }
 
   async showNote(body, file) {
     const text = (await this.app.vault.cachedRead(file)).replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
-    body.empty();
-    if (!text.trim()) { body.createDiv({ cls: 'db-emptytext', text: 'Empty note. Double-click to write.' }); return; }
-    await MarkdownRenderer.render(this.app, text, body, file.path, this);
+    this.drop(file.path);
+    const el = createDiv(), comp = this.addChild(new Component());
+    this.bodies.set(file.path, { mtime: file.stat.mtime, el, comp });
+    body.empty(); body.appendChild(el);
+    if (!text.trim()) { el.createDiv({ cls: 'db-emptytext', text: 'Empty note. Double-click to write.' }); return; }
+    await MarkdownRenderer.render(this.app, text, el, file.path, comp);
     // internal links open the note; ticking a task updates the file
-    body.querySelectorAll('a.internal-link').forEach(a => a.addEventListener('click', e => {
+    el.querySelectorAll('a.internal-link').forEach(a => a.addEventListener('click', e => {
       e.preventDefault(); this.app.workspace.openLinkText(a.getAttribute('data-href') || a.getAttribute('href'), file.path, e.ctrlKey || e.metaKey);
     }));
-    body.querySelectorAll('input.task-list-item-checkbox').forEach((box, idx) => box.addEventListener('click', async e => {
+    el.querySelectorAll('input.task-list-item-checkbox').forEach((box, idx) => box.addEventListener('click', async e => {
       e.stopPropagation();
       await this.app.vault.process(file, t => {
         let k = -1;
@@ -285,6 +384,7 @@ class DBView extends ItemView {
   edit(body, file) {
     if (this.editing) return;
     this.editing = file.path;
+    this.drop(file.path);
     this.app.vault.read(file).then(text => {
       body.empty(); body.addClass('is-editing');
       const ta = body.createEl('textarea', { cls: 'db-editor' });
